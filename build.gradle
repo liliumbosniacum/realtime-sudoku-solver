@@ -19,6 +19,9 @@ dependencies {
     implementation group: 'org.nd4j', name: 'nd4j-native-platform', version: dl4jVersion
     implementation group: 'org.deeplearning4j', name: 'deeplearning4j-core', version: dl4jVersion
     implementation group: 'org.apache.cassandra', name: 'cassandra-all', version: '3.11.10'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.7.0'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.7.0'
 }
 
 test {

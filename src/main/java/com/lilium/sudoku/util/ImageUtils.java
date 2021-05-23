@@ -11,6 +11,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import static java.lang.Math.abs;
+
 /**
  * Helper class containing methods regarding image interactions.
  *
@@ -19,6 +21,9 @@ import java.util.stream.Collectors;
 public final class ImageUtils {
     // region Members
     private static final MultiLayerNetwork NETWORK = DataUtil.loadModel();
+
+    private static int[][] solution = new int[9][9];
+    private static int[][] emptyPositions = new int[9][9];
     // endregion
 
     // region Constructor
@@ -58,7 +63,7 @@ public final class ImageUtils {
         final Mat warpedImage = warpImage(currentFrame, cornerPoints);
 
         // Solve sudoku puzzle
-        solveSudokuPuzzle(warpedImage);
+        solveSudokuPuzzle(warpedImage, currentFrame, cornerPoints);
     }
 
     /**
@@ -226,7 +231,9 @@ public final class ImageUtils {
      *
      * @param warpedImage Warped image.
      */
-    private static void solveSudokuPuzzle(final Mat warpedImage) {
+    private static void solveSudokuPuzzle(final Mat warpedImage,
+                                          final Mat currentFrame,
+                                          final Point[] cornerPoints) {
         final int cellWidth = warpedImage.width() / 9;
         final int cellHeight = warpedImage.height() / 9;
 
@@ -239,6 +246,7 @@ public final class ImageUtils {
         );
 
         final int[][] matrix = new int[9][9];
+        final int[][] emptyPositionsTemp = new int[9][9];
         for (int row = 0; row < 9; row++) {
             for (int col = 0; col < 9; col++) {
                 final double tempXPosition = (col * cellWidth);
@@ -256,6 +264,7 @@ public final class ImageUtils {
                 final int count = Core.countNonZero(cell);
                 if (count <= 50) {
                     matrix[row][col] = 0;
+                    emptyPositionsTemp[row][col] = 1;
                 } else { // We assume that there is a digit in the cell
                     // Save cell image for debugging
                     final Mat resizedCell = new Mat();
@@ -270,18 +279,209 @@ public final class ImageUtils {
                     } catch (IOException e) {
                         e.printStackTrace();
                     }
+                    emptyPositionsTemp[row][col] = 0;
                 }
             }
         }
 
+        // Try to solve the puzzle
         boolean solve = SudokuUtil.solve(matrix);
         if (solve) {
             // Print out solved matrix to the console
             printOutMatrix(matrix);
+
+            // Cache solved matrix
+            solution = matrix;
+            emptyPositions = emptyPositionsTemp;
+        }
+
+        // Print solution to the current frame
+        printSolutionToTheImage(currentFrame, cornerPoints);
+    }
+
+    /**
+     * Print found sudoku puzzle solution to the current frame.
+     *
+     * @param currentFrame Current frame.
+     * @param cornerPoints Corner points.
+     */
+    private static void printSolutionToTheImage(final Mat currentFrame,
+                                                final Point[] cornerPoints) {
+
+        final Point topLeftCorner = cornerPoints[0];
+        final Point topRightCorner = cornerPoints[1];
+        final Point bottomLeftCorner = cornerPoints[2];
+        final Point bottomRightCorner = cornerPoints[3];
+
+        final List<Point> pointsTop = linePoints(
+                topLeftCorner.x,
+                topLeftCorner.y,
+                topRightCorner.x,
+                topRightCorner.y,
+                abs(topRightCorner.x - topLeftCorner.x)
+        );
+        final List<Point> pointsLeft = linePoints(
+                topLeftCorner.x,
+                topLeftCorner.y,
+                bottomLeftCorner.x,
+                bottomLeftCorner.y,
+                abs(bottomLeftCorner.y - topLeftCorner.y)
+        );
+        final List<Point> pointsRight = linePoints(
+                topRightCorner.x,
+                topRightCorner.y,
+                bottomRightCorner.x,
+                bottomRightCorner.y,
+                abs(bottomRightCorner.y - topRightCorner.y)
+        );
+        final List<Point> pointsBottom = linePoints(
+                bottomLeftCorner.x,
+                bottomLeftCorner.y,
+                bottomRightCorner.x,
+                bottomRightCorner.y,
+                abs(bottomRightCorner.x - bottomLeftCorner.x)
+        );
+
+        final List<Line> verticalLines = new ArrayList<>();
+        final List<Line> horizontalLines = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            if (i == 0 || i == 9) {
+                continue;
+            }
+
+            verticalLines.add(new Line(
+                    pointsTop.get(i),
+                    pointsBottom.get(i)
+            ));
+
+            horizontalLines.add(new Line(
+                    pointsLeft.get(i),
+                    pointsRight.get(i)
+            ));
+        }
+
+
+        final int lineCount = horizontalLines.size();
+        for (int i = 0; i < lineCount; i++) {
+            Line line = horizontalLines.get(i);
+            for (int j = 0; j < lineCount; j++) {
+                final Point intersection = LineUtil.findIntersection(line, verticalLines.get(j));
+
+                if (intersection != null && solution != null) {
+                    if (emptyPositions[i][j] == 1) {
+                        printText(currentFrame, intersection, solution[i][j], -26, -6);
+                    }
+
+                    if (i == 7 && j == 7) {
+                        if (emptyPositions[i + 1][j + 1] == 1) {
+                            // Print bottom right corner
+                            printText(currentFrame, intersection, solution[i + 1][j + 1], 15, 30);
+                        }
+
+                        if (emptyPositions[i][j + 1] == 1) {
+                            // Print bottom right corner - one up
+                            printText(currentFrame, intersection, solution[i][j + 1], 15, -10);
+                        }
+
+                        if (emptyPositions[i + 1][j] == 1) {
+                            // Print bottom right corner - one left down
+                            printText(currentFrame, intersection, solution[i + 1][j], -20, 30);
+                        }
+                    }
+
+                    if (i !=7 && j == 7 && emptyPositions[i][j + 1] == 1) {
+                        printText(currentFrame, intersection, solution[i][j + 1], 5, -5);
+                    }
+
+                    if (i == 7 && j != 7 && emptyPositions[i + 1][j] == 1) {
+                        printText(currentFrame, intersection, solution[i + 1][j], -20, 30);
+                    }
+                }
+            }
         }
     }
 
-    public static void printOutMatrix(final int[][] matrix) {
+    /**
+     * Print forwarded text to the image.
+     *
+     * @param image Image on which the text is printed.
+     * @param point Starting point.
+     * @param value Value to print.
+     * @param offsetX Offset on x axis for the starting point.
+     * @param offsetY Offset on y axis for the starting point.
+     */
+    private static void printText(final Mat image,
+                                  final Point point,
+                                  final int value,
+                                  final int offsetX,
+                                  final int offsetY) {
+        Imgproc.putText (
+                image,
+                String.valueOf(value),
+                new Point(point.x + offsetX, point.y + offsetY),
+                1,
+                1.8,
+                new Scalar(0, 0, 255),
+                2
+        );
+    }
+
+    /**
+     * Get 9 points along the line.
+     *
+     * @param x0G Starting point x.
+     * @param y0G Starting point y.
+     * @param x1G End point x.
+     * @param y1G End point y.
+     * @param lineLength Line length.
+     * @return Returns 9 points found along the line.
+     */
+    private static List<Point> linePoints(final double x0G,
+                                          final double y0G,
+                                          final double x1G,
+                                          final double y1G,
+                                          final double lineLength) {
+        final List<Point> pointsOfLine = new ArrayList<>();
+
+        double x0 = x0G;
+        double y0 = y0G;
+
+        int split = (int) lineLength / 9;
+        double dx = abs(x1G -x0), sx = x0< x1G ? 1 : -1;
+        double dy = abs(y1G -y0), sy = y0< y1G ? 1 : -1;
+        double err = (dx>dy ? dx : -dy)/2, e2;
+
+        if (split == 0) {
+            return pointsOfLine;
+        }
+
+        for (int i = 0; i <= lineLength; i++) {
+            if (i % split == 0) {
+                pointsOfLine.add(new Point(x0,y0));
+            }
+
+            if (x0== x1G && y0== y1G) break;
+            e2 = err;
+            if (e2 >-dx)
+            {
+                err -= dy;
+                x0 += sx;
+            }
+            if (e2 < dy)
+            {
+                err += dx;
+                y0 += sy;
+            }
+        }
+        return pointsOfLine;
+    }
+
+    /**
+     * Print out forwarded matrix to the console.
+     *
+     * @param matrix Matrix to print.
+     */
+    private static void printOutMatrix(final int[][] matrix) {
         System.out.println("######################################");
         for (int[] values : matrix) {
             System.out.print(" - ");
